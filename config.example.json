@@ -1,0 +1,73 @@
+{
+  "cv_pdf": "data/cv.pdf",
+  "output_dir": "output",
+  "database_path": "data/academic_discovery.db",
+  "sync_database_path": "data/academic_discovery.sync.db",
+  "host": "127.0.0.1",
+  "port": 8000,
+  "base_url": "",
+  "log_level": "info",
+  "refresh_on_start": false,
+  "keywords": [
+    "machine learning",
+    "computational social science",
+    "causal inference"
+  ],
+  "regions": [
+    "United Kingdom",
+    "Europe"
+  ],
+  "filters": {
+    "include_types": [
+      "job",
+      "fellowship"
+    ],
+    "minimum_score": 0.15
+  },
+  "email": {
+    "enabled": false,
+    "provider": "gmail_api",
+    "minimum_score": 0.2,
+    "max_items": 10,
+    "subject": "Academic opportunities summary",
+    "gmail_api": {
+      "python_executable": ".venv/Scripts/python.exe",
+      "plugin_script": "plugins/gmail-api-mailer/scripts/send_gmail_summary.py",
+      "client_secret_path": "secrets/google_client_secret.json",
+      "token_path": "secrets/google_token.json",
+      "from_email": "your_gmail@gmail.com",
+      "to_email": "your_email@example.com"
+    }
+  },
+  "jobs_ac_uk": {
+    "enabled": true,
+    "base_url": "https://www.jobs.ac.uk/search/",
+    "queries": [
+      "computer-science",
+      "artificial-intelligence"
+    ],
+    "max_pages": 1
+  },
+  "imperial_jobs": {
+    "enabled": false,
+    "base_url": "https://www.imperial.ac.uk/jobs/search-jobs/",
+    "max_results": 30,
+    "max_show_more_clicks": 6
+  },
+  "generic_targets": [
+    {
+      "name": "Example University Fellowships",
+      "url": "https://www.example.edu/fellowships",
+      "type": "fellowship",
+      "institution": "Example University",
+      "department": "Research Office",
+      "crawl_links": true,
+      "max_links": 10,
+      "keywords": [
+        "fellowship",
+        "postdoctoral",
+        "research"
+      ]
+    }
+  ]
+}

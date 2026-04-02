@@ -1,0 +1,27 @@
+{
+  "name": "gmail-api-mailer",
+  "version": "0.1.0",
+  "description": "Gmail API mail-sending plugin for Codex local workflows.",
+  "interface": {
+    "displayName": "Gmail API Mailer",
+    "icon": "[TODO: add icon asset path if needed]"
+  },
+  "authentication": {
+    "type": "oauth2",
+    "provider": "google",
+    "instructions": "Create Google OAuth credentials with Gmail API access and store the client configuration locally."
+  },
+  "capabilities": {
+    "tools": true,
+    "hooks": false,
+    "mcp": false
+  },
+  "entrypoints": {
+    "readme": "README.md"
+  },
+  "config": {
+    "gmail_client_secret_path": "[TODO: path to Google OAuth client secret JSON]",
+    "gmail_token_path": "[TODO: path to stored Gmail OAuth token JSON]",
+    "default_from_email": "[TODO: gmail sender address]"
+  }
+}

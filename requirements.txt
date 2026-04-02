@@ -1,0 +1,12 @@
+beautifulsoup4>=4.12.3
+fastapi>=0.135.3
+google-api-python-client>=2.169.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.2
+httpx>=0.28.1
+pandas>=2.2.2
+playwright>=1.51.0
+pypdf>=5.4.0
+python-dateutil>=2.9.0
+requests>=2.32.3
+uvicorn>=0.42.0
