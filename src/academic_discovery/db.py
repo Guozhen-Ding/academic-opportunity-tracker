@@ -202,6 +202,21 @@ def initialize_database(database_path: str | Path) -> None:
                 value TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS manual_overrides (
+                url TEXT PRIMARY KEY,
+                note_override TEXT NOT NULL DEFAULT '',
+                note_is_set INTEGER NOT NULL DEFAULT 0,
+                title_override TEXT NOT NULL DEFAULT '',
+                title_is_set INTEGER NOT NULL DEFAULT 0,
+                institution_override TEXT NOT NULL DEFAULT '',
+                institution_is_set INTEGER NOT NULL DEFAULT 0,
+                posted_date_override TEXT NOT NULL DEFAULT '',
+                posted_date_is_set INTEGER NOT NULL DEFAULT 0,
+                application_deadline_override TEXT NOT NULL DEFAULT '',
+                application_deadline_is_set INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_opportunities_current_type
             ON opportunities_current(type);
 
@@ -216,6 +231,9 @@ def initialize_database(database_path: str | Path) -> None:
 
             CREATE INDEX IF NOT EXISTS idx_status_history_url
             ON status_history(url);
+
+            CREATE INDEX IF NOT EXISTS idx_manual_overrides_updated_at
+            ON manual_overrides(updated_at);
             """
         )
         _ensure_column(connection, "pipeline_runs", "diagnostics_json", "TEXT NOT NULL DEFAULT '{}'")
@@ -225,6 +243,17 @@ def initialize_database(database_path: str | Path) -> None:
         _ensure_column(connection, "opportunities_archive", "note", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "opportunities_archive", "source_key", "TEXT")
         _ensure_column(connection, "opportunities_archive", "last_seen_at", "TEXT")
+        _ensure_column(connection, "manual_overrides", "note_override", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "manual_overrides", "note_is_set", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "manual_overrides", "title_override", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "manual_overrides", "title_is_set", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "manual_overrides", "institution_override", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "manual_overrides", "institution_is_set", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "manual_overrides", "posted_date_override", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "manual_overrides", "posted_date_is_set", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "manual_overrides", "application_deadline_override", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "manual_overrides", "application_deadline_is_set", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "manual_overrides", "updated_at", "TEXT NOT NULL DEFAULT ''")
 
 
 def sync_current_opportunities(
@@ -733,7 +762,39 @@ def read_combined_opportunities(database_path: str | Path) -> list[dict[str, Any
     archived = read_archived_opportunities(database_path)
     for item in current:
         item["archived"] = False
-    return current + archived
+    return _apply_manual_overrides(current + archived, read_manual_overrides(database_path))
+
+
+def read_display_current_opportunities(database_path: str | Path) -> list[dict[str, Any]]:
+    current = read_current_opportunities(database_path)
+    for item in current:
+        item["archived"] = False
+    return _apply_manual_overrides(current, read_manual_overrides(database_path))
+
+
+def read_manual_overrides(database_path: str | Path) -> dict[str, dict[str, Any]]:
+    with connect(database_path) as connection:
+        initialize_database(database_path)
+        rows = connection.execute(
+            """
+            SELECT
+                url,
+                note_override,
+                note_is_set,
+                title_override,
+                title_is_set,
+                institution_override,
+                institution_is_set,
+                posted_date_override,
+                posted_date_is_set,
+                application_deadline_override,
+                application_deadline_is_set,
+                updated_at
+            FROM manual_overrides
+            ORDER BY updated_at DESC
+            """
+        ).fetchall()
+    return {str(row["url"]): dict(row) for row in rows}
 
 
 def read_saved_statuses(database_path: str | Path) -> list[dict[str, Any]]:
@@ -770,7 +831,7 @@ def export_runtime_state(output_dir: str | Path, database_path: str | Path) -> d
     statuses_path = output_path / "statuses.csv"
     history_path = output_path / "status_history.csv"
 
-    current_rows = read_current_opportunities(database_path)
+    current_rows = _apply_manual_overrides(read_current_opportunities(database_path), read_manual_overrides(database_path))
     jobs = [row for row in current_rows if str(row.get("type", "") or "") == "job"]
     fellowships = [row for row in current_rows if str(row.get("type", "") or "") == "fellowship"]
     status_rows = read_saved_statuses(database_path)
@@ -920,6 +981,102 @@ def set_saved_status(
     }
 
 
+def set_manual_override(
+    database_path: str | Path,
+    *,
+    url: str,
+    field: str,
+    value: str,
+) -> dict[str, Any]:
+    clean_url = str(url or "").strip()
+    if not clean_url:
+        raise ValueError("url is required")
+    normalized_field = str(field or "").strip()
+    field_map = {
+        "note": ("note_override", "note_is_set"),
+        "title": ("title_override", "title_is_set"),
+        "institution": ("institution_override", "institution_is_set"),
+        "posted_date": ("posted_date_override", "posted_date_is_set"),
+        "application_deadline": ("application_deadline_override", "application_deadline_is_set"),
+    }
+    if normalized_field not in field_map:
+        raise ValueError("unsupported override field")
+    value_column, flag_column = field_map[normalized_field]
+    cleaned_value = str(value or "")
+    now = datetime.now().isoformat(timespec="seconds")
+    with connect(database_path) as connection:
+        initialize_database(database_path)
+        connection.execute(
+            f"""
+            INSERT INTO manual_overrides (
+                url, {value_column}, {flag_column}, updated_at
+            ) VALUES (?, ?, 1, ?)
+            ON CONFLICT(url) DO UPDATE SET
+                {value_column} = excluded.{value_column},
+                {flag_column} = 1,
+                updated_at = excluded.updated_at
+            """,
+            (clean_url, cleaned_value, now),
+        )
+    return {
+        "url": clean_url,
+        "field": normalized_field,
+        "value": cleaned_value,
+        "updated_at": now,
+    }
+
+
+def reset_manual_override(
+    database_path: str | Path,
+    *,
+    url: str,
+    field: str,
+) -> dict[str, Any]:
+    clean_url = str(url or "").strip()
+    if not clean_url:
+        raise ValueError("url is required")
+    normalized_field = str(field or "").strip()
+    field_map = {
+        "note": ("note_override", "note_is_set"),
+        "title": ("title_override", "title_is_set"),
+        "institution": ("institution_override", "institution_is_set"),
+        "posted_date": ("posted_date_override", "posted_date_is_set"),
+        "application_deadline": ("application_deadline_override", "application_deadline_is_set"),
+    }
+    if normalized_field not in field_map:
+        raise ValueError("unsupported override field")
+    value_column, flag_column = field_map[normalized_field]
+    now = datetime.now().isoformat(timespec="seconds")
+    with connect(database_path) as connection:
+        initialize_database(database_path)
+        connection.execute(
+            f"""
+            UPDATE manual_overrides
+            SET {value_column} = '', {flag_column} = 0, updated_at = ?
+            WHERE url = ?
+            """,
+            (now, clean_url),
+        )
+        connection.execute(
+            """
+            DELETE FROM manual_overrides
+            WHERE url = ?
+              AND note_is_set = 0
+              AND title_is_set = 0
+              AND institution_is_set = 0
+              AND posted_date_is_set = 0
+              AND application_deadline_is_set = 0
+            """,
+            (clean_url,),
+        )
+    return {
+        "url": clean_url,
+        "field": normalized_field,
+        "reset": True,
+        "updated_at": now,
+    }
+
+
 def undo_last_status_change(database_path: str | Path) -> dict[str, Any]:
     with connect(database_path) as connection:
         initialize_database(database_path)
@@ -1017,3 +1174,46 @@ def restore_saved_statuses(database_path: str | Path) -> int:
             )
             restored += 1
     return restored
+
+
+def _apply_manual_overrides(
+    items: list[dict[str, Any]],
+    overrides: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    for item in items:
+        row = dict(item)
+        override = overrides.get(str(row.get("url", "") or ""))
+        row["manual_override_fields"] = ""
+        row["has_manual_overrides"] = False
+        row["original_title"] = str(row.get("title", "") or "")
+        row["original_institution"] = str(row.get("institution", "") or "")
+        row["original_posted_date"] = str(row.get("posted_date", "") or "")
+        row["original_application_deadline"] = str(row.get("application_deadline", "") or "")
+        row["original_note"] = str(row.get("note", "") or "")
+        if not override:
+            merged.append(row)
+            continue
+
+        active_fields: list[str] = []
+        if _coerce_int(override.get("note_is_set")):
+            row["note"] = str(override.get("note_override", "") or "")
+            active_fields.append("note")
+        if _coerce_int(override.get("title_is_set")):
+            row["title"] = str(override.get("title_override", "") or "")
+            active_fields.append("title")
+        if _coerce_int(override.get("institution_is_set")):
+            row["institution"] = str(override.get("institution_override", "") or "")
+            active_fields.append("institution")
+        if _coerce_int(override.get("posted_date_is_set")):
+            row["posted_date"] = str(override.get("posted_date_override", "") or "")
+            active_fields.append("posted_date")
+        if _coerce_int(override.get("application_deadline_is_set")):
+            row["application_deadline"] = str(override.get("application_deadline_override", "") or "")
+            active_fields.append("application_deadline")
+
+        row["manual_override_fields"] = ",".join(active_fields)
+        row["has_manual_overrides"] = bool(active_fields)
+        row["manual_overrides_updated_at"] = str(override.get("updated_at", "") or "")
+        merged.append(row)
+    return merged

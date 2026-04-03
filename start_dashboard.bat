@@ -4,6 +4,7 @@ setlocal
 set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%"
 set "PYTHON_EXE=%SCRIPT_DIR%.venv\Scripts\python.exe"
+set "BOOTSTRAP_BAT=%SCRIPT_DIR%setup_venv.bat"
 set "PYTHONPATH=%SCRIPT_DIR%src"
 set "DASHBOARD_LOG=%SCRIPT_DIR%output\dashboard_server.log"
 
@@ -11,9 +12,15 @@ if not exist "%PYTHON_EXE%" (
     echo Python virtual environment not found at:
     echo %PYTHON_EXE%
     echo.
-    echo Create or sync the .venv folder on this machine first.
-    pause
-    exit /b 1
+    echo Attempting to create a fresh .venv on this computer...
+    call "%BOOTSTRAP_BAT%"
+    if errorlevel 1 (
+        echo.
+        echo Failed to create the virtual environment automatically.
+        echo Check the setup output above.
+        pause
+        exit /b 1
+    )
 )
 
 "%PYTHON_EXE%" -V >nul 2>&1
@@ -24,10 +31,15 @@ if errorlevel 1 (
     echo This usually means the .venv folder was copied from another machine
     echo and its base Python installation path no longer exists here.
     echo.
-    echo Recreate the virtual environment on this computer, then reinstall
-    echo dependencies from requirements.txt.
-    pause
-    exit /b 1
+    echo Attempting to recreate the virtual environment on this computer...
+    call "%BOOTSTRAP_BAT%"
+    if errorlevel 1 (
+        echo.
+        echo Failed to recreate the virtual environment automatically.
+        echo Check the setup output above.
+        pause
+        exit /b 1
+    )
 )
 
 echo Closing old dashboard server processes...

@@ -39,35 +39,186 @@
       "to_email": "your_email@example.com"
     }
   },
-  "jobs_ac_uk": {
-    "enabled": true,
-    "base_url": "https://www.jobs.ac.uk/search/",
-    "queries": [
-      "computer-science",
-      "artificial-intelligence"
-    ],
-    "max_pages": 1
-  },
-  "imperial_jobs": {
-    "enabled": false,
-    "base_url": "https://www.imperial.ac.uk/jobs/search-jobs/",
-    "max_results": 30,
-    "max_show_more_clicks": 6
-  },
-  "generic_targets": [
-    {
-      "name": "Example University Fellowships",
-      "url": "https://www.example.edu/fellowships",
-      "type": "fellowship",
-      "institution": "Example University",
-      "department": "Research Office",
-      "crawl_links": true,
-      "max_links": 10,
-      "keywords": [
-        "fellowship",
-        "postdoctoral",
-        "research"
-      ]
-    }
-  ]
+  "sources": {
+    "jobs_ac_uk": {
+      "enabled": true,
+      "name": "jobs.ac.uk",
+      "type": "job",
+      "base_url": "https://www.jobs.ac.uk/search/",
+      "refresh_hours": 24,
+      "priority": 2,
+      "fetcher": "JobsAcUkFetcher",
+      "supports_dynamic": false,
+      "params": {
+        "queries": [
+          "computer-science",
+          "artificial-intelligence"
+        ],
+        "max_pages": 1
+      }
+    },
+    "imperial_jobs": {
+      "enabled": false,
+      "name": "Imperial Jobs",
+      "type": "job",
+      "base_url": "https://www.imperial.ac.uk/jobs/search-jobs/",
+      "refresh_hours": 24,
+      "priority": 6,
+      "fetcher": "ImperialJobsFetcher",
+      "supports_dynamic": true,
+      "params": {
+        "max_results": 30,
+        "max_show_more_clicks": 6
+      }
+    },
+    "euraxess_jobs": {
+      "enabled": false,
+      "name": "EURAXESS Jobs",
+      "type": "mixed",
+      "base_url": "https://euraxess.ec.europa.eu/jobs",
+      "refresh_hours": 24,
+      "priority": 5,
+      "fetcher": "EuraxessJobsFetcher",
+      "supports_dynamic": false,
+      "params": {
+        "max_results": 80
+      }
+    },
+    "epfl_jobs": {
+      "enabled": false,
+      "name": "EPFL Careers",
+      "type": "job",
+      "base_url": "https://careers.epfl.ch/go/Personnel-Scientifique/504674/",
+      "refresh_hours": 24,
+      "priority": 6,
+      "fetcher": "EPFLJobsFetcher",
+      "supports_dynamic": false,
+      "params": {
+        "max_results": 80
+      }
+    },
+    "eth_jobs": {
+      "enabled": false,
+      "name": "ETH Zurich Jobs",
+      "type": "job",
+      "base_url": "https://www.jobs.ethz.ch/",
+      "refresh_hours": 24,
+      "priority": 6,
+      "fetcher": "ETHJobsFetcher",
+      "supports_dynamic": false,
+      "params": {
+        "max_results": 80
+      }
+    },
+    "academicjobsonline_jobs": {
+      "enabled": false,
+      "name": "AcademicJobsOnline Engineering",
+      "type": "mixed",
+      "base_url": "https://academicjobsonline.org/",
+      "refresh_hours": 24,
+      "priority": 5,
+      "fetcher": "AcademicJobsOnlineFetcher",
+      "supports_dynamic": false,
+      "params": {
+        "max_results": 120,
+        "boards": [
+          "https://academicjobsonline.org/ajo/Eng/Materials%20Science",
+          "https://academicjobsonline.org/ajo/Eng/Mechanical%20Engineering",
+          "https://academicjobsonline.org/ajo/Eng/Civil%20Engineering",
+          "https://academicjobsonline.org/ajo/Eng/Chemical%20Engineering"
+        ]
+      }
+    },
+    "nus_jobs": {
+      "enabled": false,
+      "name": "NUS Careers",
+      "type": "job",
+      "base_url": "https://careers.nus.edu.sg/NUS/go/Research-%26-Other-Teaching-Positions-All/733244/",
+      "refresh_hours": 24,
+      "priority": 6,
+      "fetcher": "NUSJobsFetcher",
+      "supports_dynamic": false,
+      "params": {
+        "max_results": 80
+      }
+    },
+    "unsw_jobs": {
+      "enabled": false,
+      "name": "UNSW Jobs",
+      "type": "job",
+      "base_url": "https://external-careers.jobs.unsw.edu.au/en/search/",
+      "refresh_hours": 24,
+      "priority": 6,
+      "fetcher": "UNSWJobsFetcher",
+      "supports_dynamic": false,
+      "params": {
+        "max_results": 80
+      }
+    },
+    "kuleuven_jobs": {
+      "enabled": false,
+      "name": "KU Leuven Academic Staff",
+      "type": "job",
+      "base_url": "https://www.kuleuven.be/personeel/jobsite/jobs/staff?lang=en",
+      "refresh_hours": 24,
+      "priority": 6,
+      "fetcher": "KULeuvenJobsFetcher",
+      "supports_dynamic": false,
+      "params": {
+        "max_results": 80
+      }
+    },
+    "tudelft_jobs": {
+      "enabled": false,
+      "name": "TU Delft Careers",
+      "type": "job",
+      "base_url": "https://careers.tudelft.nl/go/All-jobs/9021002/",
+      "refresh_hours": 24,
+      "priority": 6,
+      "fetcher": "TUDelftJobsFetcher",
+      "supports_dynamic": false,
+      "params": {
+        "max_results": 80,
+        "max_pages": 5
+      }
+    },
+    "melbourne_jobs": {
+      "enabled": false,
+      "name": "University of Melbourne Jobs",
+      "type": "job",
+      "base_url": "https://jobs.unimelb.edu.au/en/search/?search-keyword=research",
+      "refresh_hours": 24,
+      "priority": 6,
+      "fetcher": "MelbourneJobsFetcher",
+      "supports_dynamic": false,
+      "params": {
+        "max_results": 80
+      }
+    },
+    "generic": [
+      {
+        "enabled": true,
+        "name": "Example University Fellowships",
+        "url": "https://www.example.edu/fellowships",
+        "type": "fellowship",
+        "institution": "Example University",
+        "department": "Research Office",
+        "crawl_links": true,
+        "max_links": 10,
+        "refresh_hours": 24,
+        "priority": 1,
+        "keywords": [
+          "fellowship",
+          "postdoctoral",
+          "research"
+        ],
+        "detail_markers": [
+          "apply",
+          "deadline",
+          "eligibility"
+        ],
+        "emit_base_page": false
+      }
+    ]
+  }
 }

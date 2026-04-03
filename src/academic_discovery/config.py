@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from academic_discovery.source_registry import SOURCE_SPECS, default_sources_config
+
 
 DEFAULT_FILTERS = {
     "include_types": ["job", "fellowship"],
@@ -76,6 +78,7 @@ def normalize_config(config: dict[str, Any]) -> dict[str, Any]:
     normalized["base_url"] = str(normalized.get("base_url") or DEFAULT_RUNTIME["base_url"]).strip()
     normalized["log_level"] = _normalize_log_level(normalized.get("log_level"))
     normalized["refresh_on_start"] = bool(normalized.get("refresh_on_start", DEFAULT_RUNTIME["refresh_on_start"]))
+    normalized["sources"] = _normalize_sources(normalized)
     return normalized
 
 
@@ -147,3 +150,79 @@ def _normalize_log_level(value: Any) -> str:
     if text not in {"critical", "error", "warning", "info", "debug"}:
         return DEFAULT_RUNTIME["log_level"]
     return text
+
+
+def _normalize_sources(config: dict[str, Any]) -> dict[str, Any]:
+    configured_sources = config.get("sources")
+    source_defaults = default_sources_config()
+    if not isinstance(configured_sources, dict):
+        configured_sources = {}
+
+    normalized_sources: dict[str, Any] = {}
+    for spec in SOURCE_SPECS:
+        nested = configured_sources.get(spec.config_section)
+        legacy = config.get(spec.config_section)
+        section = {}
+        if isinstance(nested, dict):
+            section.update(nested)
+        if isinstance(legacy, dict):
+            legacy_params = {key: value for key, value in legacy.items() if key not in {"enabled", "base_url", "refresh_hours", "priority", "type", "fetcher", "supports_dynamic", "source_key", "name", "params"}}
+            section = {
+                **legacy,
+                **section,
+                "params": {
+                    **legacy_params,
+                    **(section.get("params", {}) if isinstance(section.get("params"), dict) else {}),
+                },
+            }
+        defaults = source_defaults[spec.config_section]
+        params = section.get("params", {})
+        if not isinstance(params, dict):
+            params = {}
+        normalized_sources[spec.config_section] = {
+            "enabled": bool(section.get("enabled", defaults["enabled"])),
+            "name": str(section.get("name", spec.config_section)),
+            "type": str(section.get("type", defaults["type"])),
+            "base_url": str(section.get("base_url", "") or ""),
+            "refresh_hours": _safe_float(section.get("refresh_hours", defaults["refresh_hours"]), defaults["refresh_hours"]),
+            "priority": _safe_int(section.get("priority", defaults["priority"]), defaults["priority"]),
+            "fetcher": str(section.get("fetcher", defaults["fetcher"])),
+            "supports_dynamic": bool(section.get("supports_dynamic", defaults["supports_dynamic"])),
+            "source_key": str(section.get("source_key", "") or ""),
+            "params": params,
+        }
+
+    generic = configured_sources.get("generic", config.get("generic_targets", []))
+    normalized_generic: list[dict[str, Any]] = []
+    if isinstance(generic, list):
+        for item in generic:
+            if not isinstance(item, dict):
+                continue
+            normalized_generic.append(
+                {
+                    **item,
+                    "enabled": bool(item.get("enabled", True)),
+                    "name": str(item.get("name", item.get("url", "generic source")) or "generic source"),
+                    "type": str(item.get("type", "fellowship")),
+                    "refresh_hours": _safe_float(item.get("refresh_hours", 24), 24),
+                    "priority": _safe_int(item.get("priority", 1), 1),
+                    "keywords": _normalize_term_list(item.get("keywords")),
+                    "detail_markers": _normalize_term_list(item.get("detail_markers")),
+                }
+            )
+    normalized_sources["generic"] = normalized_generic
+    return normalized_sources
+
+
+def _safe_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)

@@ -6,17 +6,26 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from academic_discovery.db import initialize_database, record_pipeline_run, sync_current_opportunities
-from academic_discovery.webapp import create_app
+
+try:
+    from fastapi.testclient import TestClient
+    from academic_discovery.webapp import create_app
+    FASTAPI_TESTS_AVAILABLE = True
+    FASTAPI_IMPORT_ERROR = ""
+except Exception as exc:  # pragma: no cover - environment-dependent optional import
+    TestClient = None
+    create_app = None
+    FASTAPI_TESTS_AVAILABLE = False
+    FASTAPI_IMPORT_ERROR = str(exc)
 
 
+@unittest.skipUnless(FASTAPI_TESTS_AVAILABLE, f"FastAPI test dependencies unavailable: {FASTAPI_IMPORT_ERROR}")
 class ServiceAppTests(unittest.TestCase):
     def setUp(self) -> None:
         self.base_dir = Path(tempfile.gettempdir()) / "AcademicDiscoveryServiceTests" / next(tempfile._get_candidate_names())
@@ -96,6 +105,76 @@ class ServiceAppTests(unittest.TestCase):
             items = opportunities.json()["items"]
             self.assertEqual(len(items), 1)
             self.assertEqual(items[0]["title"], "Research Associate in Hydrogen Materials")
+
+    def test_manual_override_and_reset_endpoints(self) -> None:
+        app = create_app(output_dir=self.output_dir, config_path=self.config_path, refresh_on_start=False)
+        with TestClient(app) as client:
+            save = client.post(
+                "/api/opportunity-override",
+                json={
+                    "url": "https://example.com/jobs/1",
+                    "field": "application_deadline",
+                    "value": "2026-05-20",
+                },
+            )
+            self.assertEqual(save.status_code, 200)
+
+            opportunities = client.get("/api/opportunities")
+            item = opportunities.json()["items"][0]
+            self.assertEqual(item["application_deadline"], "2026-05-20")
+            self.assertEqual(item["original_application_deadline"], "")
+            self.assertIn("application_deadline", item["manual_override_fields"])
+
+            reset = client.post(
+                "/api/opportunity-override/reset",
+                json={"url": "https://example.com/jobs/1", "field": "application_deadline"},
+            )
+            self.assertEqual(reset.status_code, 200)
+            item = client.get("/api/opportunities").json()["items"][0]
+            self.assertEqual(item["application_deadline"], "")
+            self.assertNotIn("application_deadline", item["manual_override_fields"])
+
+    def test_note_endpoint_and_validation(self) -> None:
+        app = create_app(output_dir=self.output_dir, config_path=self.config_path, refresh_on_start=False)
+        with TestClient(app) as client:
+            note_response = client.post(
+                "/api/opportunity-note",
+                json={
+                    "url": "https://example.com/jobs/1",
+                    "field": "note",
+                    "value": "Worth checking with battery projects",
+                },
+            )
+            self.assertEqual(note_response.status_code, 200)
+            item = client.get("/api/opportunities").json()["items"][0]
+            self.assertEqual(item["note"], "Worth checking with battery projects")
+            self.assertIn("note", item["manual_override_fields"])
+
+            invalid_field = client.post(
+                "/api/opportunity-override",
+                json={
+                    "url": "https://example.com/jobs/1",
+                    "field": "salary",
+                    "value": "100000",
+                },
+            )
+            self.assertEqual(invalid_field.status_code, 400)
+
+            invalid_date = client.post(
+                "/api/opportunity-override",
+                json={
+                    "url": "https://example.com/jobs/1",
+                    "field": "posted_date",
+                    "value": "01/04/2026",
+                },
+            )
+            self.assertEqual(invalid_date.status_code, 400)
+
+            missing_url = client.post(
+                "/api/opportunity-note",
+                json={"url": "", "field": "note", "value": "x"},
+            )
+            self.assertEqual(missing_url.status_code, 400)
 
 
 if __name__ == "__main__":

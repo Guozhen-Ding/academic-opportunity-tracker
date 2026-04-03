@@ -5,31 +5,20 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from academic_discovery.fetchers.base import BaseFetcher
+from academic_discovery.fetchers.base import StaticListDetailFetcher
 from academic_discovery.models import Opportunity
 from academic_discovery.utils.deadlines import extract_deadline_info
 from academic_discovery.utils.text import normalize_whitespace, sentence_chunks
 
 
-class CambridgeJobsFetcher(BaseFetcher):
+class CambridgeJobsFetcher(StaticListDetailFetcher):
     def __init__(self, base_url: str, max_results: int = 80) -> None:
         super().__init__()
         self.base_url = base_url
         self.max_results = max_results
 
-    def fetch(self) -> list[Opportunity]:
-        soup = self.soup(self.base_url)
-        items = self._collect_items(soup)
-        opportunities: list[Opportunity] = []
-        for item in items:
-            try:
-                detail_soup = self.soup(item["url"])
-            except Exception:
-                continue
-            opportunity = self._extract_detail(item, detail_soup)
-            if opportunity:
-                opportunities.append(opportunity)
-        return opportunities
+    def collect_items(self, soup: BeautifulSoup) -> list[dict[str, str]]:
+        return self._collect_items(soup)
 
     def _collect_items(self, soup: BeautifulSoup) -> list[dict[str, str]]:
         items: list[dict[str, str]] = []
@@ -81,6 +70,9 @@ class CambridgeJobsFetcher(BaseFetcher):
                     break
 
         return items[: self.max_results]
+
+    def extract_detail(self, item: dict[str, str], soup: BeautifulSoup) -> Opportunity | None:
+        return self._extract_detail(item, soup)
 
     def _extract_detail(self, item: dict[str, str], soup: BeautifulSoup) -> Opportunity | None:
         text = normalize_whitespace(soup.get_text(" ", strip=True))

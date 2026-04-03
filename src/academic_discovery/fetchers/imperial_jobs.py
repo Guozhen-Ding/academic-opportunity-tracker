@@ -5,47 +5,77 @@ from io import BytesIO
 import re
 
 from bs4 import BeautifulSoup
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-from playwright.sync_api import sync_playwright
 from pypdf import PdfReader
 
-from academic_discovery.fetchers.base import BaseFetcher
+from academic_discovery.fetchers.base import DynamicListDetailFetcher
 from academic_discovery.models import Opportunity
 from academic_discovery.utils.deadlines import extract_deadline_info
 from academic_discovery.utils.text import normalize_whitespace, sentence_chunks
 
 
-class ImperialJobsFetcher(BaseFetcher):
+class ImperialJobsFetcher(DynamicListDetailFetcher):
     def __init__(self, base_url: str, max_results: int = 40, max_show_more_clicks: int = 8) -> None:
         super().__init__()
         self.base_url = base_url
         self.max_results = max_results
         self.max_show_more_clicks = max_show_more_clicks
 
-    def fetch(self) -> list[Opportunity]:
+    def collect_items_static(self) -> list[dict[str, str]]:
+        soup = self.soup(self.base_url)
+        return _extract_listing_items(soup, self.base_url, self.max_results)
+
+    def collect_items_dynamic(self) -> list[dict[str, str]]:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                return self._collect_detail_items(browser)
+            finally:
+                browser.close()
+
+    def fetch_dynamic_details(self, detail_items: list[dict[str, str]]) -> list[Opportunity]:
+        from playwright.sync_api import sync_playwright
+
         opportunities: list[Opportunity] = []
-        detail_items = self._collect_detail_items_static()
-        try:
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=True)
-                detail_items = self._collect_detail_items(browser) or detail_items
+        detail_success = 0
+        detail_failed = 0
+        parser_failures = 0
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
                 for item in detail_items:
                     try:
                         opportunity = self._fetch_detail(item, browser)
                     except Exception:
+                        detail_failed += 1
                         continue
-                    if opportunity:
-                        opportunities.append(opportunity)
+                    if opportunity is None:
+                        parser_failures += 1
+                        continue
+                    detail_success += 1
+                    opportunities.append(opportunity)
+            finally:
                 browser.close()
-        except Exception:
-            return self._fetch_static_details(detail_items)
+        self.update_diagnostics(
+            detail_success=detail_success,
+            detail_failed=detail_failed,
+            parser_failures=parser_failures,
+        )
         return opportunities
 
-    def _collect_detail_items_static(self) -> list[dict[str, str]]:
-        soup = self.soup(self.base_url)
-        return _extract_listing_items(soup, self.base_url, self.max_results)
+    def fetch_static_details(self, detail_items: list[dict[str, str]]) -> list[Opportunity]:
+        opportunities = self._fetch_static_details(detail_items)
+        self.update_diagnostics(
+            detail_success=len(opportunities),
+            detail_failed=max(0, len(detail_items) - len(opportunities)),
+            parser_failures=max(0, len(detail_items) - len(opportunities)),
+        )
+        return opportunities
 
     def _collect_detail_items(self, browser) -> list[dict[str, str]]:
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
         items: list[dict[str, str]] = []
         page = browser.new_page()
         page.goto(self.base_url, wait_until="networkidle", timeout=60000)

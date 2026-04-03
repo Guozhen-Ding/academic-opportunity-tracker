@@ -1541,6 +1541,117 @@ def render_dashboard(
       background: rgba(18, 96, 255, 0.13);
     }}
 
+    .edit-details {{
+      margin: 0 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.78);
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+    }}
+
+    .edit-details summary {{
+      cursor: pointer;
+      list-style: none;
+      padding: 12px 14px;
+      font-weight: 600;
+      color: var(--accent-deep);
+    }}
+
+    .edit-details summary::-webkit-details-marker {{
+      display: none;
+    }}
+
+    .edit-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      padding: 0 14px 14px;
+    }}
+
+    .edit-field {{
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      border: 1px solid rgba(138, 160, 187, 0.18);
+      border-radius: 14px;
+      background: rgba(248, 251, 253, 0.86);
+    }}
+
+    .edit-field.full {{
+      grid-column: 1 / -1;
+    }}
+
+    .edit-field-head {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }}
+
+    .edit-field-head strong {{
+      font-size: 0.88rem;
+      letter-spacing: 0.02em;
+    }}
+
+    .edit-input,
+    .edit-textarea {{
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(138, 160, 187, 0.28);
+      background: rgba(255,255,255,0.94);
+      color: var(--text);
+      font: inherit;
+      box-shadow: var(--shadow-soft);
+    }}
+
+    .edit-textarea {{
+      min-height: 92px;
+      resize: vertical;
+    }}
+
+    .edit-input:focus,
+    .edit-textarea:focus {{
+      outline: none;
+      border-color: rgba(18, 96, 255, 0.35);
+      box-shadow: 0 0 0 4px rgba(18, 96, 255, 0.08);
+    }}
+
+    .edit-actions {{
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }}
+
+    .button.small {{
+      min-height: 38px;
+      padding: 8px 12px;
+      font-size: 0.84rem;
+    }}
+
+    .override-badge {{
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(18, 96, 255, 0.1);
+      border: 1px solid rgba(18, 96, 255, 0.16);
+      color: var(--accent-deep);
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }}
+
+    .original-value,
+    .field-note {{
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }}
+
     .section-label {{
       margin: 0 0 8px;
       color: var(--muted);
@@ -1913,6 +2024,106 @@ def render_dashboard(
       return value === null || value === undefined || value === "" ? "N/A" : String(value);
     }}
 
+    function attr(value) {{
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }}
+
+    function overrideFields(item) {{
+      return new Set(
+        String(item.manual_override_fields || "")
+          .split(",")
+          .map(term => term.trim())
+          .filter(Boolean)
+      );
+    }}
+
+    function originalFieldKey(field) {{
+      if (field === "title") return "original_title";
+      if (field === "institution") return "original_institution";
+      if (field === "posted_date") return "original_posted_date";
+      if (field === "application_deadline") return "original_application_deadline";
+      if (field === "note") return "original_note";
+      return "";
+    }}
+
+    function fieldLabel(field) {{
+      if (field === "application_deadline") return "Deadline";
+      if (field === "posted_date") return "Posted";
+      if (field === "institution") return "Institution";
+      if (field === "title") return "Title";
+      if (field === "note") return "My note";
+      return field;
+    }}
+
+    function hasManualOverride(item, field) {{
+      return overrideFields(item).has(field);
+    }}
+
+    function originalValue(item, field) {{
+      const key = originalFieldKey(field);
+      return key ? String(item[key] || "") : "";
+    }}
+
+    function setManualOverrideState(item, field, value) {{
+      const fields = overrideFields(item);
+      const originalKey = originalFieldKey(field);
+      if (originalKey && item[originalKey] === undefined) {{
+        item[originalKey] = item[field] || "";
+      }}
+      item[field] = value;
+      fields.add(field);
+      item.manual_override_fields = [...fields].join(", ");
+      item.has_manual_overrides = fields.size > 0;
+      item.manual_overrides_updated_at = new Date().toISOString();
+    }}
+
+    function clearManualOverrideState(item, field) {{
+      const fields = overrideFields(item);
+      const originalKey = originalFieldKey(field);
+      item[field] = originalKey ? String(item[originalKey] || "") : "";
+      fields.delete(field);
+      item.manual_override_fields = [...fields].join(", ");
+      item.has_manual_overrides = fields.size > 0;
+      if (!fields.size) {{
+        item.manual_overrides_updated_at = "";
+      }}
+    }}
+
+    function originalValueMarkup(item, field) {{
+      if (!hasManualOverride(item, field)) {{
+        return "";
+      }}
+      const original = originalValue(item, field);
+      return `<div class="original-value">Original value: ${{attr(original || "empty")}}</div>`;
+    }}
+
+    function editFieldMarkup(item, field, options = {{}}) {{
+      const value = String(item[field] || "");
+      const isNote = field === "note";
+      const edited = hasManualOverride(item, field);
+      const input = isNote
+        ? `<textarea class="edit-textarea" data-edit-input="${{field}}" data-url="${{attr(item.url)}}">${{attr(value)}}</textarea>`
+        : `<input class="edit-input" data-edit-input="${{field}}" data-url="${{attr(item.url)}}" type="${{options.type || "text"}}" value="${{attr(value)}}" placeholder="${{attr(options.placeholder || "")}}">`;
+      return `
+        <div class="edit-field ${{isNote ? "full" : ""}}" data-edit-field="${{field}}" data-url="${{attr(item.url)}}">
+          <div class="edit-field-head">
+            <strong>${{fieldLabel(field)}}</strong>
+            ${{edited ? '<span class="override-badge">Manually edited</span>' : ""}}
+          </div>
+          ${{input}}
+          ${{originalValueMarkup(item, field)}}
+          <div class="edit-actions">
+            <button class="button small secondary" type="button" data-save-field="${{field}}" data-url="${{attr(item.url)}}">Save</button>
+            <button class="button small secondary" type="button" data-reset-field="${{field}}" data-url="${{attr(item.url)}}" ${{edited ? "" : "disabled"}}>Reset field</button>
+          </div>
+        </div>
+      `;
+    }}
+
     function splitTerms(text) {{
       return text
         .split(/[\\n,]+/)
@@ -1932,10 +2143,26 @@ def render_dashboard(
       sourceHealthListEl.innerHTML = items.map(item => {{
         const statusValue = String(item.status || "");
         const errorState = ["fetch_failed", "cache_fallback_after_error"].includes(statusValue);
+        const modeBits = [
+          item.dynamic_source ? "dynamic" : "static",
+          item.fetch_mode ? `mode=${{safe(item.fetch_mode)}}` : "",
+          item.fallback_used ? "fallback" : ""
+        ].filter(Boolean).join(" | ");
+        const healthBits = [
+          `items=${{safe(item.items_count)}}`,
+          `filtered=${{safe(item.filtered_count)}}`,
+          `cache=${{item.cache_hit ? "hit" : "miss"}}`,
+          `detail ok=${{safe(item.detail_success)}}`,
+          `detail fail=${{safe(item.detail_failed)}}`,
+          item.parser_failures ? `parser fail=${{safe(item.parser_failures)}}` : "",
+          item.consecutive_failures ? `fail streak=${{safe(item.consecutive_failures)}}` : "",
+          item.last_success_at ? `last success=${{safe(item.last_success_at)}}` : ""
+        ].filter(Boolean).join(" | ");
         const errorText = item.error ? `<div class="source-health-meta">${{safe(item.error)}}</div>` : "";
         return `<div class="source-health-item ${{errorState ? "error" : ""}}">
-          <strong>${{safe(item.source_key)}}</strong>
-          <div class="source-health-meta">status=${{safe(statusValue)}} | items=${{safe(item.items_count)}} | filtered=${{safe(item.filtered_count)}} | cache=${{item.cache_hit ? "hit" : "miss"}} | detail ok=${{safe(item.detail_success)}} | detail fail=${{safe(item.detail_failed)}}</div>
+          <strong>${{safe(item.source_name || item.source_key)}}</strong>
+          <div class="source-health-meta">key=${{safe(item.source_key)}} | status=${{safe(statusValue)}}${{modeBits ? ` | ${{modeBits}}` : ""}}</div>
+          <div class="source-health-meta">${{healthBits}}</div>
           ${{errorText}}
         </div>`;
       }}).join("");
@@ -1968,9 +2195,84 @@ def render_dashboard(
         showToast(normalized ? `Saved: ${{normalized}}` : "Status cleared");
         render();
       }} catch (error) {{
-        saveError = "Status could not be written to CSV. Open the dashboard through the local server.";
+        saveError = "Status could not be written to the runtime database. Open the dashboard through the local server.";
         showToast("Save failed", true);
         render();
+      }}
+    }}
+
+    async function parseApiError(response, fallbackMessage) {{
+      try {{
+        const payload = await response.json();
+        return payload.detail || payload.message || fallbackMessage;
+      }} catch (_error) {{
+        return fallbackMessage;
+      }}
+    }}
+
+    async function saveOpportunityNote(url, value) {{
+      try {{
+        const response = await fetch("/api/opportunity-note", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ url, field: "note", value }})
+        }});
+        if (!response.ok) {{
+          throw new Error(await parseApiError(response, "Note save failed"));
+        }}
+        data.forEach(item => {{
+          if (item.url === url) {{
+            setManualOverrideState(item, "note", value);
+          }}
+        }});
+        showToast("Note saved");
+        render();
+      }} catch (error) {{
+        showToast(error.message || "Note save failed", true);
+      }}
+    }}
+
+    async function saveOpportunityOverride(url, field, value) {{
+      try {{
+        const response = await fetch("/api/opportunity-override", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ url, field, value }})
+        }});
+        if (!response.ok) {{
+          throw new Error(await parseApiError(response, "Field save failed"));
+        }}
+        data.forEach(item => {{
+          if (item.url === url) {{
+            setManualOverrideState(item, field, value);
+          }}
+        }});
+        showToast(`${{fieldLabel(field)}} saved`);
+        render();
+      }} catch (error) {{
+        showToast(error.message || "Field save failed", true);
+      }}
+    }}
+
+    async function resetOpportunityOverride(url, field) {{
+      try {{
+        const response = await fetch("/api/opportunity-override/reset", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ url, field }})
+        }});
+        if (!response.ok) {{
+          throw new Error(await parseApiError(response, "Reset failed"));
+        }}
+        data.forEach(item => {{
+          if (item.url === url) {{
+            clearManualOverrideState(item, field);
+          }}
+        }});
+        showToast(`${{fieldLabel(field)}} reset`);
+        render();
+      }} catch (error) {{
+        showToast(error.message || "Reset failed", true);
       }}
     }}
 
@@ -2200,6 +2502,18 @@ def render_dashboard(
           </details>
         `
         : "";
+      const editBlock = `
+        <details class="edit-details">
+          <summary>Edit details</summary>
+          <div class="edit-grid">
+            ${{editFieldMarkup(item, "note")}}
+            ${{editFieldMarkup(item, "application_deadline", {{ type: "date", placeholder: "YYYY-MM-DD" }})}}
+            ${{editFieldMarkup(item, "posted_date", {{ type: "date", placeholder: "YYYY-MM-DD" }})}}
+            ${{editFieldMarkup(item, "title", {{ placeholder: "Override title" }})}}
+            ${{editFieldMarkup(item, "institution", {{ placeholder: "Override institution" }})}}
+          </div>
+        </details>
+      `;
 
       return `
         <article class="card">
@@ -2230,6 +2544,7 @@ def render_dashboard(
             <button class="status-btn ${{!status ? "active" : ""}}" data-status="none" data-url="${{item.url}}">Clear</button>
           </div>
           ${{keywordBlock}}
+          ${{editBlock}}
           <p class="section-label">Opportunity Summary</p>
           <p class="summary">${{safe(item.summary)}}</p>
           <p class="section-label">Why It Matches</p>
@@ -2386,6 +2701,24 @@ def render_dashboard(
           syncKeywordClearButton();
           render();
           showToast(`Filtered by keyword: ${{chip.dataset.keywordFilter || ""}}`);
+        }});
+      }});
+      root.querySelectorAll("[data-save-field]").forEach(button => {{
+        button.addEventListener("click", () => {{
+          const field = button.dataset.saveField || "";
+          const wrapper = button.closest("[data-edit-field]");
+          const input = wrapper ? wrapper.querySelector("[data-edit-input]") : null;
+          const value = input ? input.value : "";
+          if (field === "note") {{
+            void saveOpportunityNote(button.dataset.url, value);
+          }} else {{
+            void saveOpportunityOverride(button.dataset.url, field, value);
+          }}
+        }});
+      }});
+      root.querySelectorAll("[data-reset-field]").forEach(button => {{
+        button.addEventListener("click", () => {{
+          void resetOpportunityOverride(button.dataset.url, button.dataset.resetField || "");
         }});
       }});
     }}

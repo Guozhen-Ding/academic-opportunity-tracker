@@ -36,7 +36,7 @@ def extract_deadline_info(text: str, today: date | None = None) -> DeadlineInfo:
 
     labeled_deadline = _extract_labeled_date(
         text,
-        labels=["close date", "closes", "closing date", "deadline", "apply by", "application deadline"],
+        labels=["close date", "closes", "closing date", "deadline", "apply by", "application deadline", "applications close", "applications close on"],
         today=today,
     )
     if labeled_deadline:

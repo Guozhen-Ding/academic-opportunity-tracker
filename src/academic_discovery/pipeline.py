@@ -18,23 +18,16 @@ from academic_discovery.db import (
     export_sync_database,
     import_sync_database,
     initialize_database,
+    read_display_current_opportunities,
     record_config_snapshot,
     record_pipeline_run,
     run_startup_migrations,
     sync_current_opportunities,
 )
 from academic_discovery.emailer import send_summary_email
-from academic_discovery.fetchers.cambridge_jobs import CambridgeJobsFetcher
-from academic_discovery.fetchers.generic import GenericOpportunityFetcher
-from academic_discovery.fetchers.imperial_jobs import ImperialJobsFetcher
-from academic_discovery.fetchers.imperial_fellowships import ImperialFellowshipsFetcher
-from academic_discovery.fetchers.jobs_ac_uk import JobsAcUkFetcher
-from academic_discovery.fetchers.leverhulme_listings import LeverhulmeListingsFetcher
-from academic_discovery.fetchers.oxford_jobs import OxfordJobsFetcher
-from academic_discovery.fetchers.royal_society_grants import RoyalSocietyGrantsFetcher
-from academic_discovery.fetchers.ukri_opportunities import UKRIOpportunitiesFetcher
 from academic_discovery.models import Opportunity
 from academic_discovery.reporting import render_email_summary, write_outputs
+from academic_discovery.source_registry import resolve_sources
 from academic_discovery.utils.dedupe import deduplicate
 from academic_discovery.utils.scoring import (
     DEFAULT_BROAD_TERMS,
@@ -43,7 +36,7 @@ from academic_discovery.utils.scoring import (
     score_opportunity,
     should_keep_opportunity,
 )
-from academic_discovery.utils.text import normalize_whitespace, slugify_query
+from academic_discovery.utils.text import normalize_whitespace
 
 
 @dataclass
@@ -52,22 +45,40 @@ class FetchResult:
     items: list[Opportunity]
     status: str
     cache_hit: bool
+    source_name: str = ""
+    kind: str = ""
+    source_priority: int = 0
+    dynamic_source: bool = False
+    fallback_used: bool = False
+    fetch_mode: str = "static"
     list_count: int = 0
     detail_success: int = 0
     detail_failed: int = 0
     filtered_count: int = 0
+    consecutive_failures: int = 0
+    last_success_at: str = ""
+    parser_failures: int = 0
     error: str = ""
 
     def to_diagnostic(self) -> dict[str, Any]:
         return {
             "source_key": self.source_key,
+            "source_name": self.source_name,
+            "kind": self.kind,
+            "source_priority": self.source_priority,
             "status": self.status,
             "cache_hit": self.cache_hit,
+            "dynamic_source": self.dynamic_source,
+            "fallback_used": self.fallback_used,
+            "fetch_mode": self.fetch_mode,
             "items_count": len(self.items),
             "list_count": self.list_count,
             "detail_success": self.detail_success,
             "detail_failed": self.detail_failed,
+            "parser_failures": self.parser_failures,
             "filtered_count": self.filtered_count,
+            "consecutive_failures": self.consecutive_failures,
+            "last_success_at": self.last_success_at,
             "error": self.error,
         }
 
@@ -87,156 +98,17 @@ def run_pipeline(config: dict) -> dict:
     initialize_database(database_path)
     run_startup_migrations(output_dir, database_path)
 
-    jobs_config = config.get("jobs_ac_uk", {})
-    if jobs_config.get("enabled"):
+    for resolved_source in resolve_sources(config):
         result = _fetch_or_load_cached(
-            source_key="jobs_ac_uk_v3",
-            refresh_hours=float(jobs_config.get("refresh_hours", 24)),
+            source_key=resolved_source.source_key,
+            refresh_hours=resolved_source.refresh_hours,
             fetch_state=fetch_state,
             cache_dir=cache_dir,
-            factory=lambda: JobsAcUkFetcher(
-                base_url=jobs_config["base_url"],
-                queries=jobs_config.get("queries", []),
-                max_pages=int(jobs_config.get("max_pages", 1)),
-            ),
-        )
-        source_diagnostics.append(result.to_diagnostic())
-        opportunities.extend(result.items)
-
-    cambridge_config = config.get("cambridge_jobs", {})
-    if cambridge_config.get("enabled"):
-        result = _fetch_or_load_cached(
-            source_key="cambridge_jobs_v2",
-            refresh_hours=float(cambridge_config.get("refresh_hours", 24)),
-            fetch_state=fetch_state,
-            cache_dir=cache_dir,
-            factory=lambda: CambridgeJobsFetcher(
-                base_url=cambridge_config["base_url"],
-                max_results=int(cambridge_config.get("max_results", 80)),
-            ),
-        )
-        source_diagnostics.append(result.to_diagnostic())
-        opportunities.extend(result.items)
-
-    imperial_config = config.get("imperial_jobs", {})
-    if imperial_config.get("enabled"):
-        result = _fetch_or_load_cached(
-            source_key="imperial_jobs_v4",
-            refresh_hours=float(imperial_config.get("refresh_hours", 24)),
-            fetch_state=fetch_state,
-            cache_dir=cache_dir,
-            factory=lambda: ImperialJobsFetcher(
-                base_url=imperial_config["base_url"],
-                max_results=int(imperial_config.get("max_results", 40)),
-                max_show_more_clicks=int(imperial_config.get("max_show_more_clicks", 8)),
-            ),
-        )
-        source_diagnostics.append(result.to_diagnostic())
-        opportunities.extend(result.items)
-
-    imperial_fellowships_config = config.get("imperial_fellowships", {})
-    if imperial_fellowships_config.get("enabled"):
-        result = _fetch_or_load_cached(
-            source_key="imperial_fellowships_v1",
-            refresh_hours=float(imperial_fellowships_config.get("refresh_hours", 24)),
-            fetch_state=fetch_state,
-            cache_dir=cache_dir,
-            factory=lambda: ImperialFellowshipsFetcher(
-                base_url=imperial_fellowships_config["base_url"],
-                max_results=int(imperial_fellowships_config.get("max_results", 200)),
-            ),
-        )
-        source_diagnostics.append(result.to_diagnostic())
-        opportunities.extend(result.items)
-
-    leverhulme_config = config.get("leverhulme_listings", {})
-    if leverhulme_config.get("enabled"):
-        result = _fetch_or_load_cached(
-            source_key="leverhulme_listings_v1",
-            refresh_hours=float(leverhulme_config.get("refresh_hours", 24)),
-            fetch_state=fetch_state,
-            cache_dir=cache_dir,
-            factory=lambda: LeverhulmeListingsFetcher(
-                base_url=leverhulme_config["base_url"],
-                max_results=int(leverhulme_config.get("max_results", 20)),
-            ),
-        )
-        source_diagnostics.append(result.to_diagnostic())
-        opportunities.extend(result.items)
-
-    oxford_config = config.get("oxford_jobs", {})
-    if oxford_config.get("enabled"):
-        result = _fetch_or_load_cached(
-            source_key="oxford_jobs_v1",
-            refresh_hours=float(oxford_config.get("refresh_hours", 24)),
-            fetch_state=fetch_state,
-            cache_dir=cache_dir,
-            factory=lambda: OxfordJobsFetcher(
-                base_url=oxford_config["base_url"],
-                max_results=int(oxford_config.get("max_results", 40)),
-            ),
-        )
-        source_diagnostics.append(result.to_diagnostic())
-        opportunities.extend(result.items)
-
-    royal_society_config = config.get("royal_society_grants", {})
-    if royal_society_config.get("enabled"):
-        result = _fetch_or_load_cached(
-            source_key="royal_society_grants_v4",
-            refresh_hours=float(royal_society_config.get("refresh_hours", 24)),
-            fetch_state=fetch_state,
-            cache_dir=cache_dir,
-            factory=lambda: RoyalSocietyGrantsFetcher(
-                base_url=royal_society_config["base_url"],
-                max_results=int(royal_society_config.get("max_results", 60)),
-                max_pages=int(royal_society_config.get("max_pages", 6)),
-            ),
-        )
-        source_diagnostics.append(result.to_diagnostic())
-        opportunities.extend(result.items)
-
-    ukri_config = config.get("ukri_opportunities", {})
-    if ukri_config.get("enabled"):
-        result = _fetch_or_load_cached(
-            source_key="ukri_opportunities_v1",
-            refresh_hours=float(ukri_config.get("refresh_hours", 24)),
-            fetch_state=fetch_state,
-            cache_dir=cache_dir,
-            factory=lambda: UKRIOpportunitiesFetcher(
-                base_url=ukri_config["base_url"],
-                max_pages=int(ukri_config.get("max_pages", 12)),
-                max_results=int(ukri_config.get("max_results", 120)),
-            ),
-        )
-        source_diagnostics.append(result.to_diagnostic())
-        opportunities.extend(result.items)
-
-    ukri_epsrc_config = config.get("ukri_epsrc_fellowships", {})
-    if ukri_epsrc_config.get("enabled"):
-        result = _fetch_or_load_cached(
-            source_key="ukri_epsrc_fellowships_v1",
-            refresh_hours=float(ukri_epsrc_config.get("refresh_hours", 24)),
-            fetch_state=fetch_state,
-            cache_dir=cache_dir,
-            factory=lambda: UKRIOpportunitiesFetcher(
-                base_url=ukri_epsrc_config["base_url"],
-                max_pages=int(ukri_epsrc_config.get("max_pages", 1)),
-                max_results=int(ukri_epsrc_config.get("max_results", 60)),
-            ),
-        )
-        source_diagnostics.append(result.to_diagnostic())
-        opportunities.extend(result.items)
-
-    for index, target in enumerate(config.get("generic_targets", [])):
-        if not target.get("enabled", True):
-            continue
-        source_key = f"generic_{index}_{slugify_query(target.get('name', target.get('url', 'source')))}"
-        result = _fetch_or_load_cached(
-            source_key=source_key,
-            refresh_hours=float(target.get("refresh_hours", 24)),
-            fetch_state=fetch_state,
-            cache_dir=cache_dir,
-            factory=lambda target=target: GenericOpportunityFetcher(target),
+            factory=resolved_source.factory,
+            source_name=resolved_source.name,
+            kind=resolved_source.kind,
+            source_priority=resolved_source.source_priority,
+            supports_dynamic=resolved_source.supports_dynamic,
         )
         source_diagnostics.append(result.to_diagnostic())
         opportunities.extend(result.items)
@@ -307,7 +179,7 @@ def run_pipeline(config: dict) -> dict:
         database_path,
         [item.to_record() if hasattr(item, "to_record") else item for item in filtered],
     )
-    filtered = [_record_to_opportunity(record) for record in current_records]
+    filtered = [_record_to_opportunity(record) for record in read_display_current_opportunities(database_path)]
 
     outputs = write_outputs(
         filtered,
@@ -421,8 +293,13 @@ def _fetch_or_load_cached(
     fetch_state: dict[str, dict],
     cache_dir: Path,
     factory,
+    source_name: str = "",
+    kind: str = "",
+    source_priority: int = 0,
+    supports_dynamic: bool = False,
 ) -> FetchResult:
     cache_path = cache_dir / f"{source_key}.csv"
+    state = fetch_state.get(source_key, {})
     if _is_cache_fresh(fetch_state, source_key, refresh_hours) and cache_path.exists():
         items = _load_cached_opportunities(cache_path)
         return FetchResult(
@@ -430,45 +307,96 @@ def _fetch_or_load_cached(
             items=items,
             status="cache_hit",
             cache_hit=True,
+            source_name=source_name,
+            kind=kind,
+            source_priority=source_priority,
+            dynamic_source=supports_dynamic,
             list_count=len(items),
             detail_success=len(items),
+            consecutive_failures=int(state.get("consecutive_failures", 0) or 0),
+            last_success_at=str(state.get("last_success_at", "") or ""),
         )
 
     try:
         fetcher = factory()
         items = fetcher.fetch()
+        fetcher_diagnostics = _extract_fetcher_diagnostics(fetcher)
         for item in items:
             item.source_key = source_key
         _write_cached_opportunities(cache_path, items)
         fetch_state[source_key] = {
             "fetched_at": datetime.utcnow().isoformat(timespec="seconds"),
+            "last_success_at": datetime.utcnow().isoformat(timespec="seconds"),
             "count": len(items),
+            "consecutive_failures": 0,
+            "last_status": "fetched",
+            "last_error": "",
         }
         return FetchResult(
             source_key=source_key,
             items=items,
             status="fetched",
             cache_hit=False,
-            list_count=len(items),
-            detail_success=len(items),
+            source_name=source_name,
+            kind=kind,
+            source_priority=source_priority,
+            dynamic_source=bool(fetcher_diagnostics.get("dynamic_source", supports_dynamic)),
+            fallback_used=bool(fetcher_diagnostics.get("fallback_used", False)),
+            fetch_mode=str(fetcher_diagnostics.get("fetch_mode", "static") or "static"),
+            list_count=int(fetcher_diagnostics.get("list_count", len(items)) or len(items)),
+            detail_success=int(fetcher_diagnostics.get("detail_success", len(items)) or len(items)),
+            detail_failed=int(fetcher_diagnostics.get("detail_failed", 0) or 0),
+            parser_failures=int(fetcher_diagnostics.get("parser_failures", 0) or 0),
+            consecutive_failures=0,
+            last_success_at=str(fetch_state[source_key].get("last_success_at", "") or ""),
+            error=str(fetcher_diagnostics.get("error", "") or ""),
         )
     except Exception as exc:
+        next_failures = int(state.get("consecutive_failures", 0) or 0) + 1
         if cache_path.exists():
             items = _load_cached_opportunities(cache_path)
+            fetch_state[source_key] = {
+                **state,
+                "consecutive_failures": next_failures,
+                "last_status": "cache_fallback_after_error",
+                "last_error": str(exc),
+            }
             return FetchResult(
                 source_key=source_key,
                 items=items,
                 status="cache_fallback_after_error",
                 cache_hit=True,
+                source_name=source_name,
+                kind=kind,
+                source_priority=source_priority,
+                dynamic_source=supports_dynamic,
+                fallback_used=True,
+                fetch_mode="static",
                 list_count=len(items),
                 detail_success=len(items),
+                consecutive_failures=next_failures,
+                last_success_at=str(state.get("last_success_at", "") or ""),
                 error=str(exc),
             )
+        fetch_state[source_key] = {
+            **state,
+            "consecutive_failures": next_failures,
+            "last_status": "fetch_failed",
+            "last_error": str(exc),
+        }
         return FetchResult(
             source_key=source_key,
             items=[],
             status="fetch_failed",
             cache_hit=False,
+            source_name=source_name,
+            kind=kind,
+            source_priority=source_priority,
+            dynamic_source=supports_dynamic,
+            fallback_used=False,
+            fetch_mode="static",
+            consecutive_failures=next_failures,
+            last_success_at=str(state.get("last_success_at", "") or ""),
             error=str(exc),
         )
     finally:
@@ -498,6 +426,16 @@ def _load_fetch_state(path: Path) -> dict[str, dict]:
 
 def _save_fetch_state(path: Path, fetch_state: dict[str, dict]) -> None:
     path.write_text(json.dumps(fetch_state, indent=2), encoding="utf-8")
+
+
+def _extract_fetcher_diagnostics(fetcher: Any) -> dict[str, Any]:
+    try:
+        diagnostics = fetcher.diagnostics()
+    except Exception:
+        diagnostics = {}
+    if not isinstance(diagnostics, dict):
+        diagnostics = {}
+    return diagnostics
 
 
 def _write_cached_opportunities(path: Path, items: list[Opportunity]) -> None:

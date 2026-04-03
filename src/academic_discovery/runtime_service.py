@@ -13,6 +13,7 @@ from academic_discovery.db import (
     export_sync_database,
     export_runtime_state,
     import_sync_database,
+    reset_manual_override,
     read_active_runtime_session,
     read_combined_opportunities,
     read_latest_config_snapshot,
@@ -20,6 +21,7 @@ from academic_discovery.db import (
     read_saved_statuses,
     read_status_history_summary,
     restore_saved_statuses,
+    set_manual_override,
     set_saved_status,
     undo_last_status_change,
     upsert_runtime_session,
@@ -69,6 +71,37 @@ def update_status(output_dir: str | Path, url: str, status: str | None = None, c
         status=status or "",
         meta=find_opportunity_meta(output_dir, url, config_path),
     )
+    export_runtime_state(output_dir, database_path)
+    sync_path = _resolve_sync_database_path(config_path)
+    export_sync_database(database_path, sync_path)
+    return result
+
+
+def update_opportunity_override(
+    output_dir: str | Path,
+    *,
+    url: str,
+    field: str,
+    value: str,
+    config_path: str | Path | None = None,
+) -> dict[str, Any]:
+    database_path = resolve_database_path(output_dir, config_path)
+    result = set_manual_override(database_path, url=url, field=field, value=value)
+    export_runtime_state(output_dir, database_path)
+    sync_path = _resolve_sync_database_path(config_path)
+    export_sync_database(database_path, sync_path)
+    return result
+
+
+def reset_opportunity_override(
+    output_dir: str | Path,
+    *,
+    url: str,
+    field: str,
+    config_path: str | Path | None = None,
+) -> dict[str, Any]:
+    database_path = resolve_database_path(output_dir, config_path)
+    result = reset_manual_override(database_path, url=url, field=field)
     export_runtime_state(output_dir, database_path)
     sync_path = _resolve_sync_database_path(config_path)
     export_sync_database(database_path, sync_path)
@@ -137,7 +170,7 @@ def write_runtime_session(output_dir: str | Path, config_path: str | Path | None
     database_path = resolve_database_path(output_dir, config_path)
     import_sync_database(database_path, _resolve_sync_database_path(config_path))
     session_key = f"{socket.gethostname()}:{os.getpid()}"
-    warning = read_session_status(output_path)
+    warning = read_session_status(output_path, config_path)
     now = datetime.now().isoformat(timespec="seconds")
     upsert_runtime_session(
         database_path,

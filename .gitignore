@@ -27,3 +27,9 @@ data/
 
 _js_check.js
 cd
+
+# Safe-to-clean workspace artifacts
+output/dashboard_session*.json
+output/*.log
+output/*.db-journal
+output/logs/

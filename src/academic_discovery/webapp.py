@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +21,11 @@ from academic_discovery.runtime_service import (
     read_runtime_opportunities,
     read_session_status,
     read_system_state,
+    reset_opportunity_override,
     restore_statuses,
     save_runtime_config,
     undo_status,
+    update_opportunity_override,
     update_status,
     write_runtime_session,
 )
@@ -38,6 +41,17 @@ class ConfigPayload(BaseModel):
     exclude_terms: list[str] | str | None = None
     protected_terms: list[str] | str | None = None
     expanded_terms: list[str] | str | None = None
+
+
+class OverridePayload(BaseModel):
+    url: str
+    field: str
+    value: str
+
+
+class OverrideResetPayload(BaseModel):
+    url: str
+    field: str
 
 
 def create_app(
@@ -72,6 +86,16 @@ def create_app(
             seen.add(key)
             cleaned.append(value)
         return cleaned
+
+    def validate_override_value(field: str, value: str) -> str:
+        normalized_field = field.strip()
+        cleaned_value = str(value or "")
+        if normalized_field in {"posted_date", "application_deadline"} and cleaned_value:
+            try:
+                datetime.strptime(cleaned_value, "%Y-%m-%d")
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"{normalized_field} must use YYYY-MM-DD") from exc
+        return cleaned_value
 
     def run_background_refresh() -> None:
         if not refresh_lock.acquire(blocking=False):
@@ -200,6 +224,55 @@ def create_app(
             raise HTTPException(status_code=400, detail="Invalid status")
         result = update_status(output_path, payload.url.strip(), normalized, config_file)
         return JSONResponse({"ok": True, "updated": 1 if result.get("url") else 0, "status": normalized})
+
+    @app.post("/api/opportunity-note")
+    def api_opportunity_note(payload: OverridePayload) -> JSONResponse:
+        clean_url = payload.url.strip()
+        if not clean_url:
+            raise HTTPException(status_code=400, detail="url is required")
+        clean_value = payload.value or ""
+        result = update_opportunity_override(
+            output_path,
+            url=clean_url,
+            field="note",
+            value=clean_value,
+            config_path=config_file,
+        )
+        return JSONResponse({"ok": True, **result})
+
+    @app.post("/api/opportunity-override")
+    def api_opportunity_override(payload: OverridePayload) -> JSONResponse:
+        clean_url = payload.url.strip()
+        clean_field = payload.field.strip()
+        if not clean_url:
+            raise HTTPException(status_code=400, detail="url is required")
+        if clean_field not in {"title", "institution", "posted_date", "application_deadline"}:
+            raise HTTPException(status_code=400, detail="Invalid override field")
+        clean_value = validate_override_value(clean_field, payload.value)
+        result = update_opportunity_override(
+            output_path,
+            url=clean_url,
+            field=clean_field,
+            value=clean_value,
+            config_path=config_file,
+        )
+        return JSONResponse({"ok": True, **result})
+
+    @app.post("/api/opportunity-override/reset")
+    def api_reset_opportunity_override(payload: OverrideResetPayload) -> JSONResponse:
+        clean_url = payload.url.strip()
+        clean_field = payload.field.strip()
+        if not clean_url:
+            raise HTTPException(status_code=400, detail="url is required")
+        if clean_field not in {"note", "title", "institution", "posted_date", "application_deadline"}:
+            raise HTTPException(status_code=400, detail="Invalid override field")
+        result = reset_opportunity_override(
+            output_path,
+            url=clean_url,
+            field=clean_field,
+            config_path=config_file,
+        )
+        return JSONResponse({"ok": True, **result})
 
     @app.post("/api/undo-status")
     def api_undo_status() -> JSONResponse:

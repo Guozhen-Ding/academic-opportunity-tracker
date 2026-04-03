@@ -104,6 +104,31 @@ The generated dashboard assets are:
 - `output/dashboard.js`
 - `output/dashboard.css`
 
+## Safe Cleanup
+
+If the project folder grows too large, you can run:
+
+```bash
+clean_workspace.bat
+```
+
+This performs a safe cleanup only. It removes:
+- `.tmp` contents
+- old `output/dashboard_session*.json`
+- old root `output/*.log`
+- old `output/*.db-journal`
+- old daily reports beyond the latest 5
+- old `output/status_backups` entries beyond the latest 20
+- old `output/logs` entries beyond the latest 10
+
+It does not remove:
+- `.venv` or `.venv_local`
+- runtime databases
+- `jobs.csv`, `fellowships.csv`, `statuses.csv`, `status_history.csv`
+- dashboard assets
+
+This means the project remains runnable on both computers after cleanup.
+
 ## Dual-Database Mode
 
 For two-computer use, keep:

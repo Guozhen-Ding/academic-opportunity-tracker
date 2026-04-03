@@ -17,10 +17,13 @@ from academic_discovery.db import (
     import_sync_database,
     initialize_database,
     read_archived_opportunities,
+    read_combined_opportunities,
     read_current_opportunities,
     read_saved_statuses,
+    reset_manual_override,
     restore_saved_statuses,
     run_startup_migrations,
+    set_manual_override,
     set_saved_status,
     sync_current_opportunities,
     undo_last_status_change,
@@ -163,6 +166,74 @@ class DatabaseRuntimeTests(unittest.TestCase):
         self.assertTrue(imported["imported"])
         saved = {row["url"]: row for row in read_saved_statuses(target_path)}
         self.assertEqual(saved["https://example.com/jobs/sync"]["status"], "applied")
+
+    def test_manual_override_applies_and_resets(self) -> None:
+        sync_current_opportunities(
+            self.database_path,
+            [
+                {
+                    "url": "https://example.com/jobs/override",
+                    "type": "job",
+                    "title": "Research Associate",
+                    "institution": "Example University",
+                    "posted_date": "2026-04-01",
+                    "application_deadline": "2026-04-28",
+                    "source_site": "example.com",
+                }
+            ],
+        )
+        set_manual_override(
+            self.database_path,
+            url="https://example.com/jobs/override",
+            field="application_deadline",
+            value="2026-05-15",
+        )
+        rows = {row["url"]: row for row in read_combined_opportunities(self.database_path)}
+        row = rows["https://example.com/jobs/override"]
+        self.assertEqual(row["application_deadline"], "2026-05-15")
+        self.assertEqual(row["original_application_deadline"], "2026-04-28")
+        self.assertIn("application_deadline", row["manual_override_fields"])
+
+        reset_manual_override(
+            self.database_path,
+            url="https://example.com/jobs/override",
+            field="application_deadline",
+        )
+        rows = {row["url"]: row for row in read_combined_opportunities(self.database_path)}
+        row = rows["https://example.com/jobs/override"]
+        self.assertEqual(row["application_deadline"], "2026-04-28")
+        self.assertNotIn("application_deadline", row["manual_override_fields"])
+
+    def test_manual_note_persists_for_archived_items(self) -> None:
+        set_saved_status(
+            self.database_path,
+            url="https://example.com/jobs/archive-note",
+            status="interested",
+            meta={"type": "fellowship", "title": "Archive Fellowship", "institution": "Example University"},
+        )
+        sync_current_opportunities(
+            self.database_path,
+            [
+                {
+                    "url": "https://example.com/jobs/active-only",
+                    "type": "job",
+                    "title": "Current Job",
+                    "institution": "Example University",
+                    "source_site": "example.com",
+                }
+            ],
+        )
+        set_manual_override(
+            self.database_path,
+            url="https://example.com/jobs/archive-note",
+            field="note",
+            value="Check supervisor fit before applying",
+        )
+        rows = {row["url"]: row for row in read_combined_opportunities(self.database_path)}
+        row = rows["https://example.com/jobs/archive-note"]
+        self.assertEqual(row["status"], "interested")
+        self.assertEqual(row["note"], "Check supervisor fit before applying")
+        self.assertIn("note", row["manual_override_fields"])
 
 
 if __name__ == "__main__":

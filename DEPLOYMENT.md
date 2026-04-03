@@ -48,3 +48,19 @@ python -m venv .venv
   - `sync_database_path` in the OneDrive project
 - For remote access on a private machine, bind `host` to `0.0.0.0` and use a reverse proxy or firewall rules.
 - For future cloud deployment, keep this as a single instance; SQLite is not intended for multi-instance concurrent writes.
+
+## Safe Workspace Cleanup
+
+For routine size reduction without breaking the current setup, run:
+
+```bash
+clean_workspace.bat
+```
+
+This cleanup is safe for the dual-machine workflow:
+- it keeps `.venv` and `.venv_local`
+- it keeps runtime databases and synced database copies
+- it keeps dashboard assets and exported CSV snapshots
+- it only removes temporary directories, session files, transient logs, `*.db-journal`, and older report/backup files
+
+If you later want a smaller but less plug-and-play setup, the next step is to keep only one virtual environment and let the second machine rebuild its own `.venv` on first launch.
