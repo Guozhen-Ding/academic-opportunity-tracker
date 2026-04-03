@@ -1,68 +1,129 @@
-# Academic Job and Fellowship Discovery
+# Academic Opportunity Tracker
 
-Modular Python project for reading a CV, discovering academic jobs and fellowships, scoring relevance, and generating daily outputs.
+A Python-based personal research opportunity tracker for academic jobs, fellowships, and funding calls.
 
-## Project Structure
+It reads a CV, searches across multiple academic sources, scores relevance, stores runtime data in SQLite, and serves a local dashboard where you can review, filter, correct, and annotate opportunities.
+
+## What It Does
+
+- Extracts profile keywords from a CV PDF
+- Crawls academic job and fellowship sources
+- Scores relevance against your profile and configured keywords
+- Deduplicates overlapping listings from different sources
+- Stores runtime data in SQLite instead of treating CSV as the live source
+- Exports:
+  - `jobs.csv`
+  - `fellowships.csv`
+  - `report-YYYY-MM-DD.md`
+  - dashboard assets
+- Provides a local FastAPI dashboard with:
+  - filtering and sorting
+  - status tracking: `Unprocessed`, `Interested`, `Applied`, `Ignored`
+  - source health diagnostics
+  - manual field corrections
+  - personal notes
+
+## Current Architecture
+
+The project is now structured as a single-user, deployment-oriented application:
+
+- Runtime source of truth: SQLite
+- API server: FastAPI
+- Dashboard: API-driven HTML/JS/CSS
+- Pipeline: Python fetchers + scoring + exports
+- CSV and Markdown outputs: exports only, not the live store
+
+Key runtime concepts:
+
+- `opportunities_current`: current run results
+- `opportunities_archive`: previously seen items retained for history
+- `saved_statuses`: status tracking
+- `manual_overrides`: manual corrections and notes
+
+## Supported Sources
+
+Current codebase includes dedicated fetchers for:
+
+- `jobs.ac.uk`
+- Imperial College London jobs
+- Imperial fellowship pages
+- Cambridge jobs
+- Oxford engineering jobs
+- Royal Society grants
+- Leverhulme listings
+- UKRI opportunities
+- UKRI EPSRC fellowships
+- EPFL
+- ETH Zurich
+- AcademicJobsOnline
+- EURAXESS
+- NUS
+- UNSW
+- KU Leuven
+- TU Delft
+- University of Melbourne
+
+Some sources will still need periodic maintenance when site structure changes. The dashboard exposes source diagnostics so failures are visible.
+
+## Repository Layout
 
 ```text
 .
 |-- config.example.json
 |-- requirements.txt
+|-- run_pipeline.py
+|-- serve_dashboard.py
+|-- start_dashboard.bat
+|-- clean_workspace.bat
 |-- README.md
+|-- DEPLOYMENT.md
+|-- output/
 `-- src/
     `-- academic_discovery/
-        |-- __init__.py
         |-- config.py
         |-- cv.py
-        |-- main.py
-        |-- models.py
+        |-- db.py
         |-- pipeline.py
         |-- reporting.py
+        |-- runtime_service.py
+        |-- source_registry.py
+        |-- webapp.py
         |-- fetchers/
-        |   |-- __init__.py
-        |   |-- base.py
-        |   |-- generic.py
-        |   `-- jobs_ac_uk.py
         `-- utils/
-            |-- __init__.py
-            |-- deadlines.py
-            |-- dedupe.py
-            |-- scoring.py
-            `-- text.py
 ```
 
 ## Quick Start
 
-1. Install dependencies:
+### 1. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Copy the example config and point it at your CV PDF:
+### 2. Create your config
 
 ```bash
 copy config.example.json config.json
 ```
 
-3. Run:
+Edit `config.json` and set at least:
+
+- `cv_pdf`
+- `output_dir`
+- `database_path`
+- your enabled sources
+- your keywords / filters
+
+### 3. Run the pipeline
 
 ```bash
 python run_pipeline.py --config config.json
 ```
 
-Outputs are written to the configured `output_dir`:
-- `jobs.csv`
-- `fellowships.csv`
-- `report-YYYY-MM-DD.md`
-- `dashboard.html`
-
-## Dashboard Server
-
-If you want the dashboard to operate against the runtime database and save status changes safely, run the API server instead of double-clicking the HTML file:
+### 4. Start the dashboard
 
 ```bash
-python serve_dashboard.py --output-dir output --port 8000 --open-browser --config config.json
+python serve_dashboard.py --output-dir output --config config.json --host 127.0.0.1 --port 8000
 ```
 
 Then open:
@@ -71,102 +132,151 @@ Then open:
 http://127.0.0.1:8000/dashboard.html
 ```
 
-The server now uses SQLite as the runtime source of truth. CSV files in `output/` are exports and backups, not the live store.
+On Windows, you can also use:
 
-## Deployment-Oriented Runtime
-
-The project now supports a more deployment-friendly single-user setup:
-- runtime API served by FastAPI
-- SQLite database stored at `data/academic_discovery.db` by default
-- optional OneDrive sync copy for cross-device state handoff
-- `/health` and `/api/health` endpoints for liveness checks
-- rotating API logs in `output/logs/dashboard_api.log`
-- dashboard reads only from API-backed runtime data
-
-Recommended local commands:
-
-```bash
-python run_pipeline.py --config config.json
-python serve_dashboard.py --output-dir output --config config.json --host 127.0.0.1 --port 8000
+```text
+start_dashboard.bat
 ```
 
-For a longer-running personal deployment, set in `config.json`:
-- `database_path`
-- `sync_database_path`
-- `host`
-- `port`
-- `base_url`
-- `log_level`
-- `refresh_on_start`
+## Dashboard Features
 
-The generated dashboard assets are:
+The dashboard supports:
+
+- keyword search
+- filtering by type, source, country, institution, deadline window
+- source health inspection
+- status changes:
+  - `Interested`
+  - `Applied`
+  - `Ignore`
+  - `Clear`
+- manual corrections for:
+  - `Title`
+  - `Institution`
+  - `Posted`
+  - `Deadline`
+- personal note storage
+
+Manual corrections and notes are stored in the runtime database and survive future refreshes.
+
+## Configuration Model
+
+The project is gradually moving to a registry-driven source model.
+
+`config.example.json` now separates:
+
+- global runtime settings
+- filters / scoring settings
+- email settings
+- `sources`
+
+Each source entry follows a common shape:
+
+- `enabled`
+- `name`
+- `type`
+- `base_url`
+- `refresh_hours`
+- `priority`
+- `fetcher`
+- `supports_dynamic`
+- `params`
+
+## Runtime Database
+
+Recommended setup:
+
+- keep `database_path` on the local machine outside OneDrive
+- optionally keep `sync_database_path` inside the synced project folder
+
+This lets the app:
+
+- run against a stable local SQLite database
+- export a synced copy for handoff between computers
+- avoid running SQLite directly inside OneDrive
+
+## Outputs
+
+After a successful pipeline run, the project writes:
+
+- `output/jobs.csv`
+- `output/fellowships.csv`
+- `output/report-YYYY-MM-DD.md`
 - `output/dashboard.html`
 - `output/dashboard.js`
 - `output/dashboard.css`
 
+These are exports for review and backup. The live runtime state stays in SQLite.
+
+## Email Summaries
+
+Optional email support is available.
+
+Supported flows include:
+
+- Gmail API
+- SMTP with secrets stored in `.env`
+
+Typical use case:
+
+- send a summary of newly discovered relevant opportunities after a run
+
 ## Safe Cleanup
 
-If the project folder grows too large, you can run:
+If the project folder becomes too large, run:
 
 ```bash
 clean_workspace.bat
 ```
 
-This performs a safe cleanup only. It removes:
-- `.tmp` contents
-- old `output/dashboard_session*.json`
-- old root `output/*.log`
-- old `output/*.db-journal`
-- old daily reports beyond the latest 5
-- old `output/status_backups` entries beyond the latest 20
-- old `output/logs` entries beyond the latest 10
+This performs safe cleanup of temporary files, old logs, stale session files, and excess backups without deleting:
 
-It does not remove:
-- `.venv` or `.venv_local`
+- virtual environments
 - runtime databases
-- `jobs.csv`, `fellowships.csv`, `statuses.csv`, `status_history.csv`
+- current CSV exports
 - dashboard assets
 
-This means the project remains runnable on both computers after cleanup.
+## Cross-Computer Use
 
-## Dual-Database Mode
+For two-computer usage:
 
-For two-computer use, keep:
-- `database_path` on the local machine outside OneDrive
-- `sync_database_path` inside the synced project folder
+- run the app on only one machine at a time
+- let OneDrive finish syncing before switching devices
+- keep the main runtime DB local
+- use the sync DB copy for handoff
 
-The app will:
-- import from the synced DB copy when it is newer than the local runtime DB
-- continue running against the local runtime DB
-- export the latest runtime DB back to the synced copy after refreshes and status changes
+This is safer than sharing a live SQLite database inside OneDrive.
 
-This is safer than using a live SQLite database directly inside OneDrive.
+## Development Notes
 
-## Email Summary
+The codebase is evolving toward:
 
-You can optionally email yourself a summary of new matching opportunities after each run.
+- DB-first runtime state
+- API-first dashboard rendering
+- fetcher registry for easier source expansion
+- source-specific diagnostics instead of silent failures
 
-### Gmail API plugin flow
+New sources should ideally be added via:
 
-1. Create Google OAuth desktop-app credentials and save the JSON locally.
-2. Update the `email.gmail_api` paths in `config.json`.
-3. Set `email.enabled` to `true` and `email.provider` to `gmail_api`.
-4. Run the main pipeline; on the first send, Google OAuth consent will be required.
+1. a dedicated fetcher
+2. source registry registration
+3. config template entry
+4. sample-based tests
 
-The email includes only newly discovered opportunities from the current run and can be filtered by `email.minimum_score`.
+## Deployment
 
-### Local `.env` password flow
+See:
 
-For SMTP-based email, you can keep the mail password out of `config.json` by placing it in a local `.env` file:
+- [DEPLOYMENT.md](C:/Users/79040/OneDrive%20-%20Imperial%20College%20London/Codex/Job/DEPLOYMENT.md)
 
-```env
-ACADEMIC_DISCOVERY_GMAIL_APP_PASSWORD=your-app-password
-```
+That document covers the more deployment-oriented single-user setup.
 
-Then reference it from `config.json` using `password_env`.
+## Status
 
-## Notes
+This project is suitable for:
 
-- `jobs.ac.uk` support is implemented as a static HTML fetcher with conservative parsing heuristics.
-- The generic fetcher can scan a university, funder, or research-group page and follow relevant same-domain links.
-- `playwright` is included for later dynamic-site support, but the minimal working version uses `requests` and `BeautifulSoup`.
+- personal use
+- long-running use on one machine
+- gradual expansion to more sources
+
+It is not yet intended as a polished public multi-user product.
